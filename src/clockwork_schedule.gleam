@@ -393,7 +393,11 @@ fn enqueue_job(cron, state: State) {
     |> duration.to_seconds_and_nanoseconds
     |> fn(tuple) {
       let #(seconds, nanoseconds) = tuple
-      seconds * 1000 + nanoseconds / 1_000_000
+      let milliseconds = seconds * 1000 + nanoseconds / 1_000_000
+      case milliseconds < 0 {
+        True -> 100
+        False -> milliseconds
+      }
     }
 
   process.send_after(state.self, next_occurrence, Run)

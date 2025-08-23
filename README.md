@@ -285,19 +285,6 @@ The test suite covers:
 - Review error logs
 - Consider adding error handling in jobs
 
-## Dependencies
-
-- `gleam_stdlib >=0.53.0` - Core Gleam functionality
-- `gleam_time >=1.0.0` - Time and duration handling
-- `gleam_otp >=1.0.0` - OTP abstractions
-- `gleam_erlang >=1.0.0` - Process management
-- `logging >=1.3.0` - Structured logging
-- `clockwork >=4.0.0` - Cron expression parsing
-
-## License
-
-MIT License - See LICENSE file for details
-
 ## Contributing
 
 Contributions are welcome! Please:

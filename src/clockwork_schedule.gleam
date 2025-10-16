@@ -38,22 +38,6 @@ import gleam/time/duration
 import gleam/time/timestamp
 import logging
 
-/// A handle to a running scheduler that can be used to control it.
-/// 
-/// Once you start a scheduler using `start` or `supervised`, you receive
-/// a `Schedule` handle that allows you to stop the scheduler when needed.
-/// 
-/// ## Example
-/// 
-/// ```gleam
-/// let assert Ok(schedule) = clockwork_schedule.start(scheduler)
-/// // Later...
-/// clockwork_schedule.stop(schedule)
-/// ```
-pub type Schedule {
-  Schedule(subject: process.Subject(Message))
-}
-
 /// Internal message types used by the scheduler actor.
 /// 
 /// - `Run`: Triggers the execution of the scheduled job
@@ -182,7 +166,10 @@ pub fn with_time_offset(
   )
 }
 
-fn start_actor(scheduler: Scheduler) {
+fn start_actor(
+  scheduler: Scheduler,
+  name: process.Name(Message),
+) -> actor.StartResult(process.Subject(Message)) {
   case scheduler.with_logging {
     True -> logging.configure()
     False -> Nil
@@ -210,6 +197,7 @@ fn start_actor(scheduler: Scheduler) {
     |> Ok
   })
   |> actor.on_message(loop)
+  |> actor.named(name)
   |> actor.start
 }
 
@@ -256,9 +244,11 @@ fn start_actor(scheduler: Scheduler) {
 /// The scheduler will continue running until explicitly stopped with `stop`
 /// or until the process crashes. For automatic restart on failure, use
 /// `supervised` instead.
-pub fn start(scheduler: Scheduler) -> Result(Schedule, actor.StartError) {
-  start_actor(scheduler)
-  |> result.map(fn(started) { Schedule(started.data) })
+pub fn start(
+  scheduler: Scheduler,
+  name: process.Name(Message),
+) -> actor.StartResult(process.Subject(Message)) {
+  start_actor(scheduler, name)
 }
 
 /// Creates a child specification for running the scheduler under OTP supervision.
@@ -319,13 +309,9 @@ pub fn start(scheduler: Scheduler) -> Result(Schedule, actor.StartError) {
 /// If the scheduler crashes, the supervisor will automatically restart it.
 /// The new instance will recalculate the next occurrence and continue
 /// scheduling jobs as expected.
-pub fn supervised(
-  scheduler: Scheduler,
-  schedule_receiver: process.Subject(Schedule),
-) {
+pub fn supervised(scheduler: Scheduler, name: process.Name(Message)) {
   supervision.worker(fn() {
-    use started <- result.try(start_actor(scheduler))
-    process.send(schedule_receiver, Schedule(started.data))
+    use started <- result.try(start_actor(scheduler, name))
     Ok(started)
   })
 }
@@ -357,8 +343,9 @@ pub fn supervised(
 /// 
 /// After calling `stop`, the Schedule handle becomes invalid and cannot
 /// be reused. To restart scheduling, create and start a new scheduler.
-pub fn stop(schedule: Schedule) {
-  process.send(schedule.subject, Stop)
+pub fn stop(name: process.Name(Message)) {
+  process.named_subject(name)
+  |> process.send(Stop)
 }
 
 fn loop(state: State, message: Message) {

@@ -19,7 +19,7 @@ A robust scheduling extension for the [Clockwork](https://hex.pm/packages/clockw
 ## Installation
 
 ```sh
-gleam add clockwork_schedule@1
+gleam add clockwork_schedule@2
 ```
 
 ## Quick Start
@@ -27,22 +27,26 @@ gleam add clockwork_schedule@1
 ```gleam
 import clockwork
 import clockwork_schedule
+import gleam/erlang/process
 import gleam/io
 
 pub fn main() {
   // Create a cron expression (runs every 5 minutes)
   let assert Ok(cron) = clockwork.from_string("*/5 * * * *")
-  
+
   // Define your job
   let job = fn() { io.println("Task executed!") }
-  
+
+  // Create a unique name for the scheduler
+  let name = process.new_name("my_task")
+
   // Create and start the scheduler
   let scheduler = clockwork_schedule.new("my_task", cron, job)
-  let assert Ok(schedule) = clockwork_schedule.start(scheduler)
-  
+  let assert Ok(_subject) = clockwork_schedule.start(scheduler, name)
+
   // The task will run every 5 minutes until stopped
   // Stop when done
-  clockwork_schedule.stop(schedule)
+  clockwork_schedule.stop(name)
 }
 ```
 
@@ -53,28 +57,35 @@ pub fn main() {
 ```gleam
 import clockwork
 import clockwork_schedule
+import gleam/erlang/process
 
 pub fn hourly_cleanup() {
   let assert Ok(cron) = clockwork.from_string("0 * * * *")  // Every hour
-  
-  let scheduler = 
+
+  let scheduler =
     clockwork_schedule.new("cleanup", cron, fn() {
       // Your cleanup logic here
       delete_old_temp_files()
       compress_logs()
     })
-  
-  let assert Ok(schedule) = clockwork_schedule.start(scheduler)
-  // Returns a Schedule handle for control
+
+  let name = process.new_name("cleanup")
+  let assert Ok(_subject) = clockwork_schedule.start(scheduler, name)
+  // The scheduler is now running, identified by its name
 }
 ```
 
 ### With Logging Enabled
 
 ```gleam
-let scheduler = 
+import gleam/erlang/process
+
+let scheduler =
   clockwork_schedule.new("data_sync", cron, sync_function)
   |> clockwork_schedule.with_logging()  // Enable execution logging
+
+let name = process.new_name("data_sync")
+let assert Ok(_subject) = clockwork_schedule.start(scheduler, name)
 
 // Logs will show:
 // [CLOCKWORK] Running job: data_sync at 1706025600.0
@@ -84,21 +95,28 @@ let scheduler =
 ### Time Zone Configuration
 
 ```gleam
+import gleam/erlang/process
 import gleam/time/duration
 
 // Configure for UTC+9 (Tokyo)
-let tokyo_offset = duration.hours(9)
+let tokyo_offset = duration.from_hours(9)
 
-let tokyo_scheduler = 
+let tokyo_scheduler =
   clockwork_schedule.new("tokyo_report", cron, generate_report)
   |> clockwork_schedule.with_time_offset(tokyo_offset)
 
-// Configure for UTC-5 (New York)
-let ny_offset = duration.hours(-5)
+let tokyo_name = process.new_name("tokyo_report")
+let assert Ok(_tokyo_subject) = clockwork_schedule.start(tokyo_scheduler, tokyo_name)
 
-let ny_scheduler = 
+// Configure for UTC-5 (New York)
+let ny_offset = duration.from_hours(-5)
+
+let ny_scheduler =
   clockwork_schedule.new("ny_report", cron, generate_report)
   |> clockwork_schedule.with_time_offset(ny_offset)
+
+let ny_name = process.new_name("ny_report")
+let assert Ok(_ny_subject) = clockwork_schedule.start(ny_scheduler, ny_name)
 ```
 
 ### Supervised Scheduling (Recommended for Production)
@@ -111,58 +129,68 @@ import gleam/otp/static_supervisor as supervisor
 
 pub fn main() {
   let assert Ok(cron) = clockwork.from_string("0 0 * * *")  // Daily at midnight
-  
-  let scheduler = 
+
+  let scheduler =
     clockwork_schedule.new("daily_backup", cron, backup_database)
     |> clockwork_schedule.with_logging()
-  
-  // Create a receiver for the schedule handle
-  let schedule_receiver = process.new_subject()
-  
+
+  // Create a unique name for the scheduler
+  let name = process.new_name("daily_backup")
+
   // Create the child specification
-  let child_spec = 
-    clockwork_schedule.supervised(scheduler, schedule_receiver)
-  
+  let child_spec =
+    clockwork_schedule.supervised(scheduler, name)
+
   // Add to supervision tree
-  let assert Ok(sup) =
+  let assert Ok(_sup) =
     supervisor.new(supervisor.OneForOne)
     |> supervisor.add(child_spec)
     |> supervisor.start()
-  
-  // Receive the schedule handle
-  let assert Ok(schedule) = process.receive(schedule_receiver, 1000)
-  
+
   // The scheduler is now running under supervision
   // It will automatically restart if it crashes
+  // You can control it using the name:
+  // clockwork_schedule.stop(name)
 }
 ```
 
 ### Multiple Concurrent Schedulers
 
 ```gleam
+import gleam/erlang/process
+
 pub fn start_all_schedulers() {
   // Metrics collection every 5 minutes
   let assert Ok(metrics_cron) = clockwork.from_string("*/5 * * * *")
-  let metrics_scheduler = 
+  let metrics_scheduler =
     clockwork_schedule.new("metrics", metrics_cron, collect_metrics)
-  
+
   // Database backup every day at 2 AM
   let assert Ok(backup_cron) = clockwork.from_string("0 2 * * *")
-  let backup_scheduler = 
+  let backup_scheduler =
     clockwork_schedule.new("backup", backup_cron, backup_database)
-  
+
   // Cache cleanup every hour
   let assert Ok(cache_cron) = clockwork.from_string("0 * * * *")
-  let cache_scheduler = 
+  let cache_scheduler =
     clockwork_schedule.new("cache", cache_cron, clear_cache)
-  
+
+  // Create names for all schedulers
+  let metrics_name = process.new_name("metrics")
+  let backup_name = process.new_name("backup")
+  let cache_name = process.new_name("cache")
+
   // Start all schedulers
-  let assert Ok(metrics_schedule) = clockwork_schedule.start(metrics_scheduler)
-  let assert Ok(backup_schedule) = clockwork_schedule.start(backup_scheduler)
-  let assert Ok(cache_schedule) = clockwork_schedule.start(cache_scheduler)
-  
+  let assert Ok(_metrics_subject) = clockwork_schedule.start(metrics_scheduler, metrics_name)
+  let assert Ok(_backup_subject) = clockwork_schedule.start(backup_scheduler, backup_name)
+  let assert Ok(_cache_subject) = clockwork_schedule.start(cache_scheduler, cache_name)
+
   // All three schedulers now run independently
-  #(metrics_schedule, backup_schedule, cache_schedule)
+  // Control them using their names:
+  // clockwork_schedule.stop(metrics_name)
+  // clockwork_schedule.stop(backup_name)
+  // clockwork_schedule.stop(cache_name)
+  #(metrics_name, backup_name, cache_name)
 }
 ```
 

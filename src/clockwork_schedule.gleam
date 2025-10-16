@@ -14,17 +14,19 @@
 /// - Gracefully start and stop scheduled tasks
 /// 
 /// ## Basic Usage
-/// 
+///
 /// ```gleam
 /// import clockwork
 /// import clockwork_schedule
-/// 
+/// import gleam/erlang/process
+///
 /// pub fn main() {
 ///   let assert Ok(cron) = clockwork.from_string("*/5 * * * *")
 ///   let scheduler = clockwork_schedule.new("my_task", cron, fn() { io.println("Hello!") })
-///   let assert Ok(schedule) = clockwork_schedule.start(scheduler)
+///   let name = process.new_name("my_task")
+///   let assert Ok(_subject) = clockwork_schedule.start(scheduler, name)
 ///   // Task runs every 5 minutes until stopped
-///   clockwork_schedule.stop(schedule)
+///   clockwork_schedule.stop(name)
 /// }
 /// ```
 import clockwork
@@ -69,9 +71,15 @@ type State {
 /// Use the builder pattern to configure schedulers:
 /// 
 /// ```gleam
-/// clockwork_schedule.new("backup", cron, backup_fn)
-/// |> clockwork_schedule.with_logging()
-/// |> clockwork_schedule.with_time_offset(tokyo_offset)
+/// import gleam/erlang/process
+///
+/// let scheduler =
+///   clockwork_schedule.new("backup", cron, backup_fn)
+///   |> clockwork_schedule.with_logging()
+///   |> clockwork_schedule.with_time_offset(tokyo_offset)
+///
+/// let name = process.new_name("backup")
+/// let assert Ok(_subject) = clockwork_schedule.start(scheduler, name)
 /// ```
 pub opaque type Scheduler {
   Scheduler(
@@ -135,23 +143,30 @@ pub fn with_logging(scheduler: Scheduler) -> Scheduler {
 /// - `offset`: The UTC offset as a Duration (positive for east, negative for west)
 /// 
 /// ## Example
-/// 
+///
 /// ```gleam
+/// import gleam/erlang/process
 /// import gleam/time/duration
-/// 
+///
 /// // Configure for UTC+9 (Tokyo)
 /// let tokyo_offset = duration.from_hours(9)
-/// 
-/// let scheduler = 
+///
+/// let tokyo_scheduler =
 ///   clockwork_schedule.new("tokyo_job", cron, job_fn)
 ///   |> clockwork_schedule.with_time_offset(tokyo_offset)
-/// 
+///
+/// let tokyo_name = process.new_name("tokyo_job")
+/// let assert Ok(_subject) = clockwork_schedule.start(tokyo_scheduler, tokyo_name)
+///
 /// // Configure for UTC-5 (New York)
 /// let ny_offset = duration.from_hours(-5)
-/// 
-/// let ny_scheduler = 
+///
+/// let ny_scheduler =
 ///   clockwork_schedule.new("ny_job", cron, job_fn)
 ///   |> clockwork_schedule.with_time_offset(ny_offset)
+///
+/// let ny_name = process.new_name("ny_job")
+/// let assert Ok(_subject) = clockwork_schedule.start(ny_scheduler, ny_name)
 /// ```
 pub fn with_time_offset(
   scheduler: Scheduler,
@@ -202,45 +217,48 @@ fn start_actor(
 }
 
 /// Starts an unsupervised scheduler.
-/// 
+///
 /// This function starts a scheduler as a standalone actor that will run
 /// according to its cron expression. For production use, prefer `supervised`
 /// to run the scheduler under OTP supervision for better fault tolerance.
-/// 
+///
 /// ## Parameters
-/// 
+///
 /// - `scheduler`: The scheduler configuration to start
-/// 
+/// - `name`: A unique name for the scheduler process
+///
 /// ## Returns
-/// 
-/// - `Ok(Schedule)`: A handle to control the running scheduler
+///
+/// - `Ok(Subject(Message))`: A subject to send messages to the scheduler
 /// - `Error(actor.StartError)`: If the scheduler fails to start
-/// 
+///
 /// ## Example
-/// 
+///
 /// ```gleam
 /// import clockwork
 /// import clockwork_schedule
-/// 
+/// import gleam/erlang/process
+///
 /// pub fn main() {
 ///   let assert Ok(cron) = clockwork.from_string("*/30 * * * *")  // Every 30 minutes
-///   
-///   let scheduler = 
+///
+///   let scheduler =
 ///     clockwork_schedule.new("metrics", cron, fn() {
 ///       metrics.collect_and_report()
 ///     })
 ///     |> clockwork_schedule.with_logging()
-///   
-///   let assert Ok(schedule) = clockwork_schedule.start(scheduler)
-///   
+///
+///   let name = process.new_name("metrics")
+///   let assert Ok(_subject) = clockwork_schedule.start(scheduler, name)
+///
 ///   // The scheduler is now running
 ///   // Stop it when done:
-///   clockwork_schedule.stop(schedule)
+///   clockwork_schedule.stop(name)
 /// }
 /// ```
-/// 
+///
 /// ## Note
-/// 
+///
 /// The scheduler will continue running until explicitly stopped with `stop`
 /// or until the process crashes. For automatic restart on failure, use
 /// `supervised` instead.
@@ -252,60 +270,59 @@ pub fn start(
 }
 
 /// Creates a child specification for running the scheduler under OTP supervision.
-/// 
+///
 /// This is the recommended way to run schedulers in production. The scheduler
 /// will be automatically restarted if it crashes, ensuring your scheduled
 /// tasks remain reliable.
-/// 
+///
 /// ## Parameters
-/// 
+///
 /// - `scheduler`: The scheduler configuration
-/// - `schedule_receiver`: A subject to receive the Schedule handle once started
-/// 
+/// - `name`: A unique name for the scheduler process
+///
 /// ## Returns
-/// 
+///
 /// A `supervision.ChildSpec` that can be added to your supervision tree.
-/// 
+///
 /// ## Example
-/// 
+///
 /// ```gleam
 /// import clockwork
 /// import clockwork_schedule
 /// import gleam/erlang/process
 /// import gleam/otp/static_supervisor as supervisor
-/// 
+///
 /// pub fn main() {
 ///   let assert Ok(cron) = clockwork.from_string("0 * * * *")  // Every hour
-///   
-///   let scheduler = 
+///
+///   let scheduler =
 ///     clockwork_schedule.new("hourly_task", cron, fn() {
 ///       perform_hourly_maintenance()
 ///     })
 ///     |> clockwork_schedule.with_logging()
-///   
-///   // Create a receiver for the schedule handle
-///   let schedule_receiver = process.new_subject()
-///   
+///
+///   // Create a unique name for the scheduler
+///   let name = process.new_name("hourly_task")
+///
 ///   // Create the child spec
-///   let schedule_child_spec = 
-///     clockwork_schedule.supervised(scheduler, schedule_receiver)
-///   
+///   let schedule_child_spec =
+///     clockwork_schedule.supervised(scheduler, name)
+///
 ///   // Add to supervision tree
-///   let assert Ok(sup) =
+///   let assert Ok(_sup) =
 ///     supervisor.new()
 ///     |> supervisor.add(schedule_child_spec)
 ///     |> supervisor.start()
-///   
-///   // Receive the schedule handle
-///   let assert Ok(schedule) = process.receive(schedule_receiver, 1000)
-///   
+///
 ///   // The scheduler is now running under supervision
+///   // Control it using the name:
+///   // clockwork_schedule.stop(name)
 ///   process.sleep_forever()
 /// }
 /// ```
-/// 
+///
 /// ## Fault Tolerance
-/// 
+///
 /// If the scheduler crashes, the supervisor will automatically restart it.
 /// The new instance will recalculate the next occurrence and continue
 /// scheduling jobs as expected.
@@ -317,32 +334,35 @@ pub fn supervised(scheduler: Scheduler, name: process.Name(Message)) {
 }
 
 /// Gracefully stops a running scheduler.
-/// 
+///
 /// Sends a stop message to the scheduler, which will:
 /// 1. Cancel any pending job executions
 /// 2. Log a stop message (if logging is enabled)
 /// 3. Terminate the scheduler actor
-/// 
+///
 /// ## Parameters
-/// 
-/// - `schedule`: The Schedule handle returned from `start` or `supervised`
-/// 
+///
+/// - `name`: The name of the scheduler process to stop
+///
 /// ## Example
-/// 
+///
 /// ```gleam
-/// let assert Ok(schedule) = clockwork_schedule.start(scheduler)
-/// 
+/// import gleam/erlang/process
+///
+/// let name = process.new_name("my_scheduler")
+/// let assert Ok(_subject) = clockwork_schedule.start(scheduler, name)
+///
 /// // Run for some time...
 /// process.sleep(60_000)  // 1 minute
-/// 
+///
 /// // Gracefully stop
-/// clockwork_schedule.stop(schedule)
+/// clockwork_schedule.stop(name)
 /// ```
-/// 
+///
 /// ## Note
-/// 
-/// After calling `stop`, the Schedule handle becomes invalid and cannot
-/// be reused. To restart scheduling, create and start a new scheduler.
+///
+/// After calling `stop`, the scheduler will terminate. To restart scheduling,
+/// create and start a new scheduler with a new name.
 pub fn stop(name: process.Name(Message)) {
   process.named_subject(name)
   |> process.send(Stop)

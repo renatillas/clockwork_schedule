@@ -1,31 +1,32 @@
-/// # clockwork_schedule
-/// 
-/// A scheduling extension for the Clockwork library that provides a way to define
-/// and manage recurring tasks with built-in OTP supervision support.
-/// 
-/// This module allows you to:
-/// - Schedule tasks using cron expressions
-/// - Run tasks under OTP supervision for fault tolerance
-/// - Configure time zones with UTC offsets
-/// - Enable logging for monitoring job execution
-/// - Gracefully start and stop scheduled tasks
-/// 
-/// ## Basic Usage
-///
-/// ```gleam
-/// import clockwork
-/// import clockwork_schedule
-/// import gleam/erlang/process
-///
-/// pub fn main() {
-///   let assert Ok(cron) = clockwork.from_string("*/5 * * * *")
-///   let scheduler = clockwork_schedule.new("my_task", cron, fn() { io.println("Hello!") })
-///   let name = process.new_name("my_task")
-///   let assert Ok(_subject) = clockwork_schedule.start(scheduler, name)
-///   // Task runs every 5 minutes until stopped
-///   clockwork_schedule.stop(name)
-/// }
-/// ```
+//// # clockwork_schedule
+//// 
+//// A scheduling extension for the Clockwork library that provides a way to define
+//// and manage recurring tasks with built-in OTP supervision support.
+//// 
+//// This module allows you to:
+//// - Schedule tasks using cron expressions
+//// - Run tasks under OTP supervision for fault tolerance
+//// - Configure time zones with UTC offsets
+//// - Enable logging for monitoring job execution
+//// - Gracefully start and stop scheduled tasks
+//// 
+//// ## Basic Usage
+////
+//// ```gleam
+//// import clockwork
+//// import clockwork_schedule
+//// import gleam/erlang/process
+////
+//// pub fn main() {
+////   let assert Ok(cron) = clockwork.from_string("*/5 * * * *")
+////   let scheduler = clockwork_schedule.new("my_task", cron, fn() { io.println("Hello!") })
+////   let name = process.new_name("my_task")
+////   let assert Ok(_subject) = clockwork_schedule.start(scheduler, name)
+////   // Task runs every 5 minutes until stopped
+////   clockwork_schedule.stop(name)
+//// }
+//// ```
+
 import clockwork
 import gleam/erlang/process
 import gleam/float
